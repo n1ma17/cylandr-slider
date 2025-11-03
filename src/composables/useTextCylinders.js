@@ -29,12 +29,11 @@ export function createTextCylinders(scene, geometry, ellipseScaleX = 1.5) {
   const scale = Math.min(1, drawableWidth / Math.max(1, maxLineWidth))
   const fontSize = Math.max(232, Math.floor(baseFontSize * scale))
 
-  // Build one cylinder per line
-  const textCylinders = []
-  textLines.forEach((line, idx) => {
+  // Helper to create a texture for a line with a given color
+  function buildLineTexture(line, idx, color, fontSize, baseWidth, baseHeight) {
     const canvas = document.createElement('canvas')
-    canvas.width = measureCanvas.width
-    canvas.height = measureCanvas.height / 2
+    canvas.width = baseWidth
+    canvas.height = baseHeight / 2
     const ctx = canvas.getContext('2d')
 
     // Transparent background tile
@@ -42,7 +41,7 @@ export function createTextCylinders(scene, geometry, ellipseScaleX = 1.5) {
     ctx.fillRect(0, 0, canvas.width, canvas.height)
 
     // Text style
-    ctx.fillStyle = '#383838'
+    ctx.fillStyle = color
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.font = `bold ${fontSize}px Arial`
@@ -60,18 +59,44 @@ export function createTextCylinders(scene, geometry, ellipseScaleX = 1.5) {
     texture.wrapS = THREE.RepeatWrapping
     texture.wrapT = THREE.ClampToEdgeWrapping
     texture.repeat.set(1, 1)
+    return texture
+  }
 
+  // Build one cylinder per line
+  const textCylinders = []
+  textLines.forEach((line, idx) => {
+    // Build a white text texture; we'll tint via material.color for smooth fades
+    const activeTexture = buildLineTexture(
+      line,
+      idx,
+      '#ffffff',
+      fontSize,
+      measureCanvas.width,
+      measureCanvas.height,
+    )
+
+    // Always use white texture as the map; start colored gray
     const material = new THREE.MeshBasicMaterial({
-      map: texture,
+      map: activeTexture,
       side: THREE.DoubleSide,
       transparent: true,
     })
+    material.color = new THREE.Color('#383838')
 
     const mesh = new THREE.Mesh(geometry, material)
     mesh.scale.x = ellipseScaleX
     scene.add(mesh)
 
-    textCylinders.push({ mesh, texture, speed: speeds[idx] })
+    textCylinders.push({
+      type: 'text',
+      index: idx,
+      mesh,
+      material,
+      texture: activeTexture,
+      inactiveTexture: null,
+      activeTexture,
+      speed: speeds[idx],
+    })
   })
 
   return textCylinders

@@ -17,6 +17,8 @@ let textCylinders = [] // { mesh, texture, speed }
 let sharedGeometry
 const ellipseScaleX = 1.5
 const scrollDirection = -1 // invert to change movement direction
+const COLOR_WHITE = new THREE.Color('#ffffff')
+const COLOR_GRAY = new THREE.Color('#383838')
 
 onMounted(() => {
   initScene()
@@ -123,16 +125,29 @@ function setupScrollAnimation(imageCount) {
       scrub: 1,
       onUpdate: (self) => {
         currentScrollProgress = self.progress
+        const t = Math.min(2.999999, currentScrollProgress * 3)
+        const segmentIndex = Math.floor(t)
+        const a = t - segmentIndex
         textCylinders.forEach((layer) => {
           if (typeof layer.phase === 'number') {
             // Image layers: one-by-one entry; last image reaches center at progress 1
             layer.texture.offset.x =
               (startPhaseOffset + layer.phase - currentScrollProgress) * scrollDirection
-          } else {
-            // Text layers: continuous scroll
-            layer.texture.offset.x = currentScrollProgress * layer.speed * scrollDirection
+            layer.texture.needsUpdate = true
+            return
           }
-          layer.texture.needsUpdate = true
+          if (layer.type === 'text') {
+            // Smooth crossfade color gray -> white across segment boundaries
+            let factor = 0
+            if (layer.index === segmentIndex) factor = 1 - a
+            else if (layer.index === segmentIndex + 1) factor = a
+            if (segmentIndex === 2 && layer.index === 2) factor = 1
+            layer.material.color.copy(COLOR_GRAY).lerp(COLOR_WHITE, factor)
+            layer.material.needsUpdate = true
+
+            layer.texture.offset.x = currentScrollProgress * layer.speed * scrollDirection
+            layer.texture.needsUpdate = true
+          }
         })
       },
     })
@@ -148,11 +163,23 @@ function setupScrollAnimation(imageCount) {
     const newProgress = Math.max(0, Math.min(1, currentScrollProgress + progressDelta))
     currentScrollProgress = newProgress
 
+    const t = Math.min(2.999999, currentScrollProgress * 3)
+    const segmentIndex = Math.floor(t)
+    const a = t - segmentIndex
     textCylinders.forEach((layer) => {
-      const targetX =
-        typeof layer.phase === 'number'
-          ? (startPhaseOffset + layer.phase - currentScrollProgress) * scrollDirection
-          : currentScrollProgress * layer.speed * scrollDirection
+      let targetX
+      if (typeof layer.phase === 'number') {
+        targetX = (startPhaseOffset + layer.phase - currentScrollProgress) * scrollDirection
+      } else if (layer.type === 'text') {
+        let factor = 0
+        if (layer.index === segmentIndex) factor = 1 - a
+        else if (layer.index === segmentIndex + 1) factor = a
+        if (segmentIndex === 2 && layer.index === 2) factor = 1
+        layer.material.color.copy(COLOR_GRAY).lerp(COLOR_WHITE, factor)
+        layer.material.needsUpdate = true
+        targetX = currentScrollProgress * layer.speed * scrollDirection
+      }
+
       gsap.to(layer.texture.offset, {
         x: targetX,
         duration: 0.2,
