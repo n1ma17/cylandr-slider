@@ -41,7 +41,7 @@ export async function createImageCylinders(geometry, ellipseScaleX = 1.5, speed 
 
     const layers = []
 
-    // Create one layer per image with offset positioning
+    // Create one layer per image with centered drawing; angular placement is controlled via texture offset
     imgs.forEach((img, idx) => {
       const canvas = document.createElement('canvas')
       canvas.width = 8192
@@ -63,9 +63,8 @@ export async function createImageCylinders(geometry, ellipseScaleX = 1.5, speed 
       const w = Math.floor(img.width * scale)
       const h = Math.floor(img.height * scale)
 
-      // Horizontal offset: distribute images across canvas width
-      const horizontalSpacing = canvas.width / imgs.length
-      const x = Math.floor(horizontalSpacing * idx + horizontalSpacing / 2 - w / 2)
+      // Horizontal position: draw at center; position around cylinder via texture.offset.x
+      const x = Math.floor(canvas.width / 2 - w / 2)
 
       // Vertical position: alternate top/bottom for more separation
       const verticalOffset = idx % 2 === 0 ? -canvas.height * 0.15 : canvas.height * 0.15
@@ -87,7 +86,7 @@ export async function createImageCylinders(geometry, ellipseScaleX = 1.5, speed 
       const mesh = new THREE.Mesh(geometry, material)
       mesh.scale.x = ellipseScaleX
 
-      layers.push({ mesh, texture, speed })
+      layers.push({ mesh, texture, speed, phase: idx / imgs.length })
     })
 
     return layers

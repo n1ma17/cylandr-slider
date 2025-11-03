@@ -12,6 +12,7 @@ const container = ref(null)
 let scene, camera, renderer
 let animationId
 let removeWheelListener
+let currentScrollProgress = 0
 let textCylinders = [] // { mesh, texture, speed }
 let sharedGeometry
 const ellipseScaleX = 1.5
@@ -19,7 +20,6 @@ const scrollDirection = -1 // invert to change movement direction
 
 onMounted(() => {
   initScene()
-  setupScrollAnimation()
   animate()
   window.addEventListener('resize', onWindowResize)
 })
@@ -86,6 +86,17 @@ function initScene() {
         textCylinders.push(layer)
       })
       console.log('Image layers loaded successfully:', imageLayers.length)
+      // Set initial offsets so no image is centered at start
+      const startPhaseOffset = 1 / imageLayers.length
+      textCylinders.forEach((layer) => {
+        if (typeof layer.phase === 'number') {
+          layer.texture.offset.x =
+            (startPhaseOffset + layer.phase - currentScrollProgress) * scrollDirection
+          layer.texture.needsUpdate = true
+        }
+      })
+      // Initialize scroll with distance sized to number of images
+      setupScrollAnimation(imageLayers.length)
     } else {
       console.warn('Image layers failed to load')
     }
@@ -96,18 +107,32 @@ function initScene() {
   scene.add(light)
 }
 
-function setupScrollAnimation() {
+function setupScrollAnimation(imageCount) {
+  // Compute total scroll distance sized to number of images (fallback if missing)
+  const scrollDistancePerImage = 500
+  const totalScrollDistance =
+    imageCount && imageCount > 0 ? imageCount * scrollDistancePerImage : 2000
+  const startPhaseOffset = imageCount && imageCount > 0 ? 1 / imageCount : 0
+
   // ScrollTrigger-based progress mapping (requires scrollable page)
   try {
     ScrollTrigger.create({
       trigger: container.value,
       start: 'top top',
-      end: '+=2000',
+      end: `+=${totalScrollDistance}`,
       scrub: 1,
       onUpdate: (self) => {
-        textCylinders.forEach(({ texture, speed }) => {
-          texture.offset.x = self.progress * speed * scrollDirection
-          texture.needsUpdate = true
+        currentScrollProgress = self.progress
+        textCylinders.forEach((layer) => {
+          if (typeof layer.phase === 'number') {
+            // Image layers: one-by-one entry; last image reaches center at progress 1
+            layer.texture.offset.x =
+              (startPhaseOffset + layer.phase - currentScrollProgress) * scrollDirection
+          } else {
+            // Text layers: continuous scroll
+            layer.texture.offset.x = currentScrollProgress * layer.speed * scrollDirection
+          }
+          layer.texture.needsUpdate = true
         })
       },
     })
@@ -115,17 +140,25 @@ function setupScrollAnimation() {
     // ignore if ScrollTrigger cannot be created (e.g., no scrollable area)
   }
 
-  // Wheel fallback: moves texture even if page itself doesn't scroll
+  // Wheel fallback: emulate progress in [0,1] so scroll ends at last image
   const onWheel = (e) => {
     const delta = e.deltaY || 0
-    const step = delta * 0.0006 * scrollDirection
-    textCylinders.forEach(({ texture, speed }) => {
-      gsap.to(texture.offset, {
-        x: texture.offset.x + step * speed,
+    // Map wheel delta to progress in [0,1] based on total scroll distance
+    const progressDelta = delta / totalScrollDistance
+    const newProgress = Math.max(0, Math.min(1, currentScrollProgress + progressDelta))
+    currentScrollProgress = newProgress
+
+    textCylinders.forEach((layer) => {
+      const targetX =
+        typeof layer.phase === 'number'
+          ? (startPhaseOffset + layer.phase - currentScrollProgress) * scrollDirection
+          : currentScrollProgress * layer.speed * scrollDirection
+      gsap.to(layer.texture.offset, {
+        x: targetX,
         duration: 0.2,
         ease: 'power2.out',
         onUpdate: () => {
-          texture.needsUpdate = true
+          layer.texture.needsUpdate = true
         },
       })
     })
