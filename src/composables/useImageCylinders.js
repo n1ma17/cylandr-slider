@@ -44,8 +44,8 @@ export async function createImageCylinders(geometry, ellipseScaleX = 1.5, speed 
     // Create one layer per image with centered drawing; angular placement is controlled via texture offset
     imgs.forEach((img, idx) => {
       const canvas = document.createElement('canvas')
-      canvas.width = 8192
-      canvas.height = 2048
+      canvas.width = 4096
+      canvas.height = 1024
       const ctx = canvas.getContext('2d')
 
       // Transparent background
@@ -79,8 +79,10 @@ export async function createImageCylinders(geometry, ellipseScaleX = 1.5, speed 
 
       const material = new THREE.MeshBasicMaterial({
         map: texture,
-        side: THREE.DoubleSide,
+        side: THREE.BackSide, // Camera is inside cylinder, only render back faces
         transparent: true,
+        depthWrite: false, // Optimize transparent rendering
+        depthTest: false, // Reduce depth buffer operations
       })
 
       const mesh = new THREE.Mesh(geometry, material)

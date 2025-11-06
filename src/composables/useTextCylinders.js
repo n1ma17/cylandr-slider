@@ -18,8 +18,8 @@ export function createTextCylinders(scene, geometry, ellipseScaleX = 1.5) {
 
   // Compute common font size to fit the longest line
   const measureCanvas = document.createElement('canvas')
-  measureCanvas.width = 8192
-  measureCanvas.height = 4096
+  measureCanvas.width = 6144
+  measureCanvas.height = 3072
   const measureCtx = measureCanvas.getContext('2d')
   const padX = Math.floor(measureCanvas.width * 0.12)
   const drawableWidth = measureCanvas.width - padX * 2
@@ -78,8 +78,10 @@ export function createTextCylinders(scene, geometry, ellipseScaleX = 1.5) {
     // Always use white texture as the map; start colored gray
     const material = new THREE.MeshBasicMaterial({
       map: activeTexture,
-      side: THREE.DoubleSide,
+      side: THREE.BackSide, // Camera is inside cylinder, only render back faces
       transparent: true,
+      depthWrite: false, // Optimize transparent rendering
+      depthTest: false, // Reduce depth buffer operations
     })
     material.color = new THREE.Color('#383838')
 
