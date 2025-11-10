@@ -13,12 +13,13 @@ let scene, camera, renderer
 let animationId
 let removeWheelListener
 let currentScrollProgress = 0
-let textCylinders = [] // { mesh, texture, speed }
+let textCylinders = [] // { mesh, texture, speed } or { mesh, speed, angle, phase }
 let sharedGeometry
 let activeTweens = new Map() // Track active tweens per layer to prevent spam
 let resizeTimeout = null // Debounce resize events
 let lastWindowSize = { width: 0, height: 0 } // Track size changes
 const ellipseScaleX = 1.5
+const cylinderRadius = 665
 const scrollDirection = 1 // 1 = left to right, -1 = right to left
 const COLOR_WHITE = new THREE.Color('#ffffff')
 const COLOR_GRAY = new THREE.Color('#383838')
@@ -72,15 +73,15 @@ function initScene() {
     renderer.setClearColor(0x000000, 0) // Transparent
     renderer.setSize(window.innerWidth, window.innerHeight)
     renderer.setPixelRatio(window.devicePixelRatio)
+    renderer.sortObjects = true // Enable render order sorting
     container.value.appendChild(renderer.domElement)
   } catch (error) {
     console.error('WebGL not supported:', error)
     return
   }
 
-  // Geometry shared by all text layers
+  // Geometry shared by all text layers (curved cylinders)
   const cylinderHeight = window.innerHeight
-  const cylinderRadius = 665
   const cylinderSegments = 64
   sharedGeometry = new THREE.CylinderGeometry(
     cylinderRadius,
@@ -91,25 +92,17 @@ function initScene() {
     true,
   )
 
-  // Create text cylinders using the composable
+  // Create text cylinders (curved) using the composable
   textCylinders = createTextCylinders(scene, sharedGeometry, ellipseScaleX)
 
-  // Create image cylinders using the composable
-  createImageCylinders(sharedGeometry, ellipseScaleX).then((imageLayers) => {
+  // Create image planes (flat) using the composable
+  createImageCylinders(cylinderRadius, ellipseScaleX).then((imageLayers) => {
     if (imageLayers && imageLayers.length > 0) {
       imageLayers.forEach((layer) => {
         scene.add(layer.mesh)
         textCylinders.push(layer)
       })
       console.log('Image layers loaded successfully:', imageLayers.length)
-      // Set initial offsets so no image is centered at start
-      const startPhaseOffset = 1 / imageLayers.length
-      textCylinders.forEach((layer) => {
-        if (typeof layer.phase === 'number') {
-          layer.texture.offset.x =
-            (startPhaseOffset + layer.phase - currentScrollProgress) * scrollDirection
-        }
-      })
       // Initialize scroll with distance sized to number of images
       setupScrollAnimation(imageLayers.length)
     } else {
@@ -159,39 +152,62 @@ function updateLayersForProgress(progress, startPhaseOffset, useDirectUpdate = f
     easedProgress = (segmentIdx + easedLocal) * progressPerImage
   }
 
-  // Pre-compute common values
-  const progressTimesDirection = easedProgress * scrollDirection
-
   textCylinders.forEach((layer, idx) => {
-    let targetX
     if (typeof layer.phase === 'number') {
-      // Image layers - use eased progress
-      targetX = (startPhaseOffset + layer.phase - easedProgress) * scrollDirection
+      // Image layers (flat planes) - move position on cylinder path
+      const targetAngle =
+        (startPhaseOffset + layer.phase - easedProgress) * scrollDirection * Math.PI * 2
+      const targetX = Math.sin(targetAngle) * layer.cylinderRadius * layer.ellipseScaleX
+      const targetZ = -Math.cos(targetAngle) * layer.cylinderRadius
+
+      if (useDirectUpdate) {
+        layer.mesh.position.x = targetX
+        layer.mesh.position.z = targetZ
+        layer.mesh.lookAt(0, layer.mesh.position.y, 0)
+        layer.angle = targetAngle
+      } else {
+        const existingTween = activeTweens.get(idx)
+        if (existingTween) {
+          existingTween.kill()
+        }
+        const tween = gsap.to(layer.mesh.position, {
+          x: targetX,
+          z: targetZ,
+          duration: 0.2,
+          ease: 'power2.out',
+          onUpdate: () => {
+            layer.mesh.lookAt(0, layer.mesh.position.y, 0)
+          },
+          onComplete: () => {
+            activeTweens.delete(idx)
+            layer.angle = targetAngle
+          },
+        })
+        activeTweens.set(idx, tween)
+      }
     } else if (layer.type === 'text') {
-      // Text layers with color crossfade - use cached factor
+      // Text layers (curved cylinders) - use texture offset
       const factor = textColorFactors[layer.index]
       layer.material.color.copy(COLOR_GRAY).lerp(COLOR_WHITE, factor)
-      targetX = progressTimesDirection * layer.speed
-    }
+      const targetX = easedProgress * scrollDirection * layer.speed
 
-    if (useDirectUpdate) {
-      // Direct update for ScrollTrigger (no animation needed)
-      layer.texture.offset.x = targetX
-    } else {
-      // Smooth animation for wheel events
-      const existingTween = activeTweens.get(idx)
-      if (existingTween) {
-        existingTween.kill()
+      if (useDirectUpdate) {
+        layer.texture.offset.x = targetX
+      } else {
+        const existingTween = activeTweens.get(idx)
+        if (existingTween) {
+          existingTween.kill()
+        }
+        const tween = gsap.to(layer.texture.offset, {
+          x: targetX,
+          duration: 0.2,
+          ease: 'power2.out',
+          onComplete: () => {
+            activeTweens.delete(idx)
+          },
+        })
+        activeTweens.set(idx, tween)
       }
-      const tween = gsap.to(layer.texture.offset, {
-        x: targetX,
-        duration: 0.2,
-        ease: 'power2.out',
-        onComplete: () => {
-          activeTweens.delete(idx)
-        },
-      })
-      activeTweens.set(idx, tween)
     }
   })
 }
@@ -263,7 +279,6 @@ function onWindowResize() {
 
     // Update shared geometry and apply to all text cylinders
     const cylinderHeight = currentHeight
-    const cylinderRadius = 665
     const cylinderSegments = 64
     const newGeometry = new THREE.CylinderGeometry(
       cylinderRadius,
@@ -275,10 +290,13 @@ function onWindowResize() {
     )
     if (sharedGeometry) sharedGeometry.dispose()
     sharedGeometry = newGeometry
-    textCylinders.forEach(({ mesh }) => {
-      mesh.geometry.dispose()
-      mesh.geometry = sharedGeometry
-      mesh.scale.x = ellipseScaleX
+
+    textCylinders.forEach((layer) => {
+      if (layer.type === 'text') {
+        layer.mesh.geometry.dispose()
+        layer.mesh.geometry = sharedGeometry
+        layer.mesh.scale.x = ellipseScaleX
+      }
     })
   }, 300)
 }

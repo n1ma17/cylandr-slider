@@ -87,6 +87,7 @@ export function createTextCylinders(scene, geometry, ellipseScaleX = 1.5) {
 
     const mesh = new THREE.Mesh(geometry, material)
     mesh.scale.x = ellipseScaleX
+    mesh.renderOrder = 1 // Text renders first (behind images)
     scene.add(mesh)
 
     textCylinders.push({
