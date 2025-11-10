@@ -43,52 +43,55 @@ export async function createImageCylinders(geometry, ellipseScaleX = 1.5, speed 
 
     // Create one layer per image with centered drawing; angular placement is controlled via texture offset
     imgs.forEach((img, idx) => {
+      // Build a texture from the original image (no wide cylinder canvas)
       const canvas = document.createElement('canvas')
-      canvas.width = 4096
-      canvas.height = 1024
+      // Keep high-res but bounded canvas for crisp textures
+      const maxTexWidth = 1024
+      const maxTexHeight = 1024
+      const scale = Math.min(maxTexWidth / img.width, maxTexHeight / img.height, 1)
+      const texW = Math.max(2, Math.floor(img.width * scale))
+      const texH = Math.max(2, Math.floor(img.height * scale))
+      canvas.width = texW
+      canvas.height = texH
       const ctx = canvas.getContext('2d')
-
-      // Transparent background
-      ctx.fillStyle = 'rgba(255,255,255,0)'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-      // Mirror for inside view
-      ctx.translate(canvas.width, 0)
-      ctx.scale(-1, 1)
-
-      // Calculate image size - smaller to avoid overlap
-      const maxWidth = canvas.width * 0.08
-      const maxHeight = canvas.height * 0.6
-      const scale = Math.min(maxWidth / img.width, maxHeight / img.height)
-      const w = Math.floor(img.width * scale)
-      const h = Math.floor(img.height * scale)
-
-      // Horizontal position: draw at center; position around cylinder via texture.offset.x
-      const x = Math.floor(canvas.width / 2 - w / 2)
-
-      // Vertical position: alternate top/bottom for more separation
-      const verticalOffset = idx % 2 === 0 ? -canvas.height * 0.15 : canvas.height * 0.15
-      const y = Math.floor(canvas.height / 2 - h / 2 + verticalOffset)
-
-      ctx.drawImage(img, x, y, w, h)
+      ctx.clearRect(0, 0, texW, texH)
+      ctx.drawImage(img, 0, 0, texW, texH)
 
       const texture = new THREE.CanvasTexture(canvas)
-      texture.wrapS = THREE.RepeatWrapping
+      texture.wrapS = THREE.ClampToEdgeWrapping
       texture.wrapT = THREE.ClampToEdgeWrapping
-      texture.repeat.set(1, 1)
+      texture.minFilter = THREE.LinearMipmapLinearFilter
+      texture.generateMipmaps = true
 
       const material = new THREE.MeshBasicMaterial({
         map: texture,
-        side: THREE.BackSide, // Camera is inside cylinder, only render back faces
+        side: THREE.FrontSide, // Planes will face toward the camera (center)
         transparent: true,
-        depthWrite: false, // Optimize transparent rendering
-        depthTest: false, // Reduce depth buffer operations
+        depthWrite: false,
+        depthTest: false,
       })
 
-      const mesh = new THREE.Mesh(geometry, material)
-      mesh.scale.x = ellipseScaleX
+      // Create a flat plane for each image maintaining aspect ratio
+      // Choose a reasonable world size; tweak if needed
+      const baseWidth = 380
+      const aspect = texH > 0 ? texW / texH : 1
+      const planeWidth = baseWidth
+      const planeHeight = Math.max(50, Math.floor(planeWidth / Math.max(0.01, aspect)))
+      const plane = new THREE.PlaneGeometry(planeWidth, planeHeight)
+      const mesh = new THREE.Mesh(plane, material)
 
-      layers.push({ mesh, texture, speed, phase: idx / imgs.length })
+      // Alternate slight vertical offsets to reduce overlap
+      const cylinderHeight = window.innerHeight
+      const yOffset = idx % 2 === 0 ? -cylinderHeight * 0.12 : cylinderHeight * 0.12
+
+      layers.push({
+        mesh,
+        texture,
+        speed,
+        phase: idx / imgs.length,
+        yOffset,
+        isPlane: true,
+      })
     })
 
     return layers

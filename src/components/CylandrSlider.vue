@@ -22,6 +22,8 @@ const ellipseScaleX = 1.5
 const scrollDirection = -1 // invert to change movement direction
 const COLOR_WHITE = new THREE.Color('#ffffff')
 const COLOR_GRAY = new THREE.Color('#383838')
+const CYLINDER_RADIUS = 665
+let scrollTween = null
 
 onMounted(() => {
   initScene()
@@ -46,6 +48,10 @@ onUnmounted(() => {
   // Kill all active tweens
   activeTweens.forEach((tween) => tween.kill())
   activeTweens.clear()
+  if (scrollTween) {
+    scrollTween.kill()
+    scrollTween = null
+  }
   if (ScrollTrigger) {
     ScrollTrigger.getAll().forEach((t) => t.kill())
   }
@@ -75,7 +81,7 @@ function initScene() {
 
   // Geometry shared by all text layers
   const cylinderHeight = window.innerHeight
-  const cylinderRadius = 665
+  const cylinderRadius = CYLINDER_RADIUS
   const cylinderSegments = 64
   sharedGeometry = new THREE.CylinderGeometry(
     cylinderRadius,
@@ -97,12 +103,19 @@ function initScene() {
         textCylinders.push(layer)
       })
       console.log('Image layers loaded successfully:', imageLayers.length)
-      // Set initial offsets so no image is centered at start
+      // Set initial positions so no image is centered at start
       const startPhaseOffset = 1 / imageLayers.length
+      const radiusZ = CYLINDER_RADIUS
+      const radiusX = CYLINDER_RADIUS * ellipseScaleX
       textCylinders.forEach((layer) => {
-        if (typeof layer.phase === 'number') {
-          layer.texture.offset.x =
-            (startPhaseOffset + layer.phase - currentScrollProgress) * scrollDirection
+        if (typeof layer.phase === 'number' && layer.isPlane) {
+          const s = (startPhaseOffset + layer.phase - currentScrollProgress) * scrollDirection
+          const theta = s * Math.PI * 2
+          const x = radiusX * Math.cos(theta)
+          const z = radiusZ * Math.sin(theta)
+          layer.mesh.position.set(x, layer.yOffset ?? 0, z)
+          // Face toward center
+          layer.mesh.rotation.y = Math.atan2(x, z) + Math.PI
         }
       })
       // Initialize scroll with distance sized to number of images
@@ -137,37 +150,67 @@ function updateLayersForProgress(progress, startPhaseOffset, useDirectUpdate = f
 
   // Pre-compute common values
   const progressTimesDirection = progress * scrollDirection
+  const radiusZ = CYLINDER_RADIUS
+  const radiusX = CYLINDER_RADIUS * ellipseScaleX
 
   textCylinders.forEach((layer, idx) => {
     let targetX
     if (typeof layer.phase === 'number') {
-      // Image layers - pre-computed multiplication
-      targetX = (startPhaseOffset + layer.phase - progress) * scrollDirection
+      // Image layers (planes) - place along ellipse, not by texture offset
+      const s = (startPhaseOffset + layer.phase - progress) * scrollDirection
+      const theta = s * Math.PI * 2
+      const x = radiusX * Math.cos(theta)
+      const z = radiusZ * Math.sin(theta)
+      const y = layer.yOffset ?? 0
+      const rotY = Math.atan2(x, z) + Math.PI
+
+      if (useDirectUpdate) {
+        layer.mesh.position.set(x, y, z)
+        layer.mesh.rotation.y = rotY
+      } else {
+        const existingTween = activeTweens.get(idx)
+        if (existingTween) {
+          existingTween.kill()
+        }
+        const tween = gsap.to(layer.mesh.position, {
+          x,
+          y,
+          z,
+          duration: 0.6,
+          ease: 'power3.out',
+          onComplete: () => {
+            activeTweens.delete(idx)
+          },
+        })
+        activeTweens.set(idx, tween)
+        gsap.to(layer.mesh.rotation, {
+          y: rotY,
+          duration: 0.45,
+          ease: 'power2.out',
+        })
+      }
     } else if (layer.type === 'text') {
       // Text layers with color crossfade - use cached factor
       const factor = textColorFactors[layer.index]
       layer.material.color.copy(COLOR_GRAY).lerp(COLOR_WHITE, factor)
       targetX = progressTimesDirection * layer.speed
-    }
-
-    if (useDirectUpdate) {
-      // Direct update for ScrollTrigger (no animation needed)
-      layer.texture.offset.x = targetX
-    } else {
-      // Smooth animation for wheel events
-      const existingTween = activeTweens.get(idx)
-      if (existingTween) {
-        existingTween.kill()
+      if (useDirectUpdate) {
+        layer.texture.offset.x = targetX
+      } else {
+        const existingTween = activeTweens.get(idx)
+        if (existingTween) {
+          existingTween.kill()
+        }
+        const tween = gsap.to(layer.texture.offset, {
+          x: targetX,
+          duration: 0.45,
+          ease: 'power3.out',
+          onComplete: () => {
+            activeTweens.delete(idx)
+          },
+        })
+        activeTweens.set(idx, tween)
       }
-      const tween = gsap.to(layer.texture.offset, {
-        x: targetX,
-        duration: 0.2,
-        ease: 'power2.out',
-        onComplete: () => {
-          activeTweens.delete(idx)
-        },
-      })
-      activeTweens.set(idx, tween)
     }
   })
 }
@@ -185,7 +228,7 @@ function setupScrollAnimation(imageCount) {
       trigger: container.value,
       start: 'top top',
       end: `+=${totalScrollDistance}`,
-      scrub: 1,
+      scrub: 1.2,
       onUpdate: (self) => {
         currentScrollProgress = self.progress
         updateLayersForProgress(currentScrollProgress, startPhaseOffset, true)
@@ -201,8 +244,23 @@ function setupScrollAnimation(imageCount) {
     // Map wheel delta to progress in [0,1] based on total scroll distance
     const progressDelta = delta / totalScrollDistance
     const newProgress = Math.max(0, Math.min(1, currentScrollProgress + progressDelta))
-    currentScrollProgress = newProgress
-    updateLayersForProgress(currentScrollProgress, startPhaseOffset, false)
+    if (scrollTween) {
+      scrollTween.kill()
+      scrollTween = null
+    }
+    const proxy = { p: currentScrollProgress }
+    scrollTween = gsap.to(proxy, {
+      p: newProgress,
+      duration: 0.6,
+      ease: 'power3.out',
+      onUpdate: () => {
+        currentScrollProgress = proxy.p
+        updateLayersForProgress(currentScrollProgress, startPhaseOffset, true)
+      },
+      onComplete: () => {
+        scrollTween = null
+      },
+    })
   }
   window.addEventListener('wheel', onWheel, { passive: true })
   removeWheelListener = () => window.removeEventListener('wheel', onWheel)
@@ -239,7 +297,7 @@ function onWindowResize() {
 
     // Update shared geometry and apply to all text cylinders
     const cylinderHeight = currentHeight
-    const cylinderRadius = 665
+    const cylinderRadius = CYLINDER_RADIUS
     const cylinderSegments = 64
     const newGeometry = new THREE.CylinderGeometry(
       cylinderRadius,
@@ -251,11 +309,21 @@ function onWindowResize() {
     )
     if (sharedGeometry) sharedGeometry.dispose()
     sharedGeometry = newGeometry
-    textCylinders.forEach(({ mesh }) => {
-      mesh.geometry.dispose()
-      mesh.geometry = sharedGeometry
-      mesh.scale.x = ellipseScaleX
+    textCylinders.forEach((layer) => {
+      const { mesh } = layer
+      if (mesh.geometry && mesh.geometry.type === 'CylinderGeometry') {
+        mesh.geometry.dispose()
+        mesh.geometry = sharedGeometry
+        mesh.scale.x = ellipseScaleX
+      } else {
+        // Planes keep their geometry; just reposition after resize
+      }
     })
+
+    // Reposition planes after resize using current progress
+    const imageLayers = textCylinders.filter((l) => typeof l.phase === 'number')
+    const startPhaseOffset = imageLayers.length > 0 ? 1 / imageLayers.length : 0
+    updateLayersForProgress(currentScrollProgress, startPhaseOffset, true)
   }, 300)
 }
 </script>
