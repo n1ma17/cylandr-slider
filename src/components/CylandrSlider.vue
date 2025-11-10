@@ -208,8 +208,8 @@ function updateLayersForProgress(
         }
         const tween = gsap.to(layer.texture.offset, {
           x: targetX,
-          duration: 0.3, // Increased for smoother text movement
-          ease: 'power2.out',
+          duration: 0.2,
+          ease: 'sine.out',
           onComplete: () => {
             activeTweens.delete(idx)
           },
@@ -242,12 +242,9 @@ function setupScrollAnimation(imageCount) {
       start: 'top top',
       end: `+=${totalScrollDistance}`,
       scrub: 0.5, // Lower value = smoother
-      snap: {
-        snapTo: snapPoints,
-        duration: { min: 0.3, max: 0.6 },
-        ease: 'sine.inOut',
-      },
       onUpdate: (self) => {
+        // Skip text updates while wheel transition animates images
+        if (typeof isTransitioning !== 'undefined' && isTransitioning) return
         currentScrollProgress = self.progress
         updateLayersForProgress(currentScrollProgress, startPhaseOffset, true, false)
       },
@@ -260,6 +257,14 @@ function setupScrollAnimation(imageCount) {
   let isTransitioning = false
   const imageLayers = textCylinders.filter((l) => typeof l.phase === 'number')
   const angleStep = (Math.PI * 2) / Math.max(1, imageCount)
+  let textProgressTween = null
+  let textProgress = currentScrollProgress
+
+  function wrap01(v) {
+    v = v % 1
+    if (v < 0) v += 1
+    return v
+  }
 
   function normalizeAngle(a) {
     let x = a % (Math.PI * 2)
@@ -295,6 +300,8 @@ function setupScrollAnimation(imageCount) {
 
     const prevIndex = findCurrentIndex()
     const targetIndex = (prevIndex + direction + imageLayers.length) % imageLayers.length
+
+    // Do not snap text; it will be advanced incrementally on wheel
 
     let completed = 0
     const total = imageLayers.length
@@ -344,9 +351,6 @@ function setupScrollAnimation(imageCount) {
           completed += 1
           if (completed === total) {
             isTransitioning = false
-            // Snap text to new image index
-            const progressForText = targetIndex / Math.max(1, imageCount)
-            updateLayersForProgress(progressForText, 1 / Math.max(1, imageCount), true, false)
           }
         },
       })
@@ -359,12 +363,18 @@ function setupScrollAnimation(imageCount) {
     if (delta === 0) return
     // Determine direction: down => next (+1), up => prev (-1)
     const direction = delta > 0 ? 1 : -1
+    // Advance text smoothly without snap based on wheel intensity
+    const magnitude = Math.min(Math.abs(delta) / 1000, 1) || 0.5
+    const step = (1 / Math.max(1, imageCount)) * 0.45 * magnitude
+    textProgress = wrap01(textProgress + direction * step)
+    updateLayersForProgress(textProgress, startPhaseOffset, false, false)
     performTransition(direction)
   }
 
   window.addEventListener('wheel', onWheel, { passive: false })
   removeWheelListener = () => {
     window.removeEventListener('wheel', onWheel)
+    if (textProgressTween) textProgressTween.kill()
   }
 }
 

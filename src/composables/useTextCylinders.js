@@ -14,7 +14,7 @@ export function createTextCylinders(scene, geometry, ellipseScaleX = 1.5) {
     'TOUCHSCREEN     LED WALL    ON-SITE IMMERSIVE SALES CENTER    IMMEDIATE VISUALIZATION     REAL-TIME UPGRADES',
     'REAL-WORLD OVERLAY DESIGN & PRE-CONSTRUCTION VISUALIZATION      LUXURY SALES CENTER INSTALLATIONS     ARCHITECTURAL STORYTELLING',
   ]
-  const speeds = [0.1, 0.07, 0.086]
+  const speeds = [0.8, 0.6, 0.75]
 
   // Compute common font size to fit the longest line
   const measureCanvas = document.createElement('canvas')
@@ -23,11 +23,11 @@ export function createTextCylinders(scene, geometry, ellipseScaleX = 1.5) {
   const measureCtx = measureCanvas.getContext('2d')
   const padX = Math.floor(measureCanvas.width * 0.12)
   const drawableWidth = measureCanvas.width - padX * 2
-  const baseFontSize = 100
+  const baseFontSize = 80
   measureCtx.font = `bold ${baseFontSize}px Arial`
   const maxLineWidth = textLines.reduce((m, t) => Math.max(m, measureCtx.measureText(t).width), 0)
   const scale = Math.min(1, drawableWidth / Math.max(1, maxLineWidth))
-  const fontSize = Math.max(232, Math.floor(baseFontSize * scale))
+  const fontSize = Math.max(140, Math.floor(baseFontSize * scale))
 
   // Helper to create a texture for a line with a given color
   function buildLineTexture(line, idx, color, fontSize, baseWidth, baseHeight) {
