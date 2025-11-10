@@ -116,7 +116,12 @@ function initScene() {
 }
 
 // Shared function to update layer positions and colors based on scroll progress
-function updateLayersForProgress(progress, startPhaseOffset, useDirectUpdate = false) {
+function updateLayersForProgress(
+  progress,
+  startPhaseOffset,
+  useDirectUpdate = false,
+  updateImages = true,
+) {
   const t = Math.min(2.999999, progress * 3)
   const segmentIndex = Math.floor(t)
   const a = t - segmentIndex
@@ -154,6 +159,9 @@ function updateLayersForProgress(progress, startPhaseOffset, useDirectUpdate = f
 
   textCylinders.forEach((layer, idx) => {
     if (typeof layer.phase === 'number') {
+      if (!updateImages) {
+        return
+      }
       // Image layers (flat planes) - move position on cylinder path
       const targetAngle =
         (startPhaseOffset + layer.phase - easedProgress) * scrollDirection * Math.PI * 2
@@ -173,7 +181,7 @@ function updateLayersForProgress(progress, startPhaseOffset, useDirectUpdate = f
         const tween = gsap.to(layer.mesh.position, {
           x: targetX,
           z: targetZ,
-          duration: 0.2,
+          duration: 0.4, // Increased for smoother movement
           ease: 'power2.out',
           onUpdate: () => {
             layer.mesh.lookAt(0, layer.mesh.position.y, 0)
@@ -200,7 +208,7 @@ function updateLayersForProgress(progress, startPhaseOffset, useDirectUpdate = f
         }
         const tween = gsap.to(layer.texture.offset, {
           x: targetX,
-          duration: 0.2,
+          duration: 0.3, // Increased for smoother text movement
           ease: 'power2.out',
           onComplete: () => {
             activeTweens.delete(idx)
@@ -214,38 +222,150 @@ function updateLayersForProgress(progress, startPhaseOffset, useDirectUpdate = f
 
 function setupScrollAnimation(imageCount) {
   // Compute total scroll distance sized to number of images (fallback if missing)
-  const scrollDistancePerImage = 500
+  const scrollDistancePerImage = 700
   const totalScrollDistance =
     imageCount && imageCount > 0 ? imageCount * scrollDistancePerImage : 2000
   const startPhaseOffset = imageCount && imageCount > 0 ? 1 / imageCount : 0
 
-  // ScrollTrigger-based progress mapping (requires scrollable page)
+  // Create snap points for each image
+  const snapPoints = []
+  if (imageCount > 0) {
+    for (let i = 0; i < imageCount; i++) {
+      snapPoints.push(i / imageCount)
+    }
+  }
+
+  // ScrollTrigger-based progress mapping with snap
   try {
     ScrollTrigger.create({
       trigger: container.value,
       start: 'top top',
       end: `+=${totalScrollDistance}`,
-      scrub: 1,
+      scrub: 0.5, // Lower value = smoother
+      snap: {
+        snapTo: snapPoints,
+        duration: { min: 0.3, max: 0.6 },
+        ease: 'sine.inOut',
+      },
       onUpdate: (self) => {
         currentScrollProgress = self.progress
-        updateLayersForProgress(currentScrollProgress, startPhaseOffset, true)
+        updateLayersForProgress(currentScrollProgress, startPhaseOffset, true, false)
       },
     })
   } catch {
     // ignore if ScrollTrigger cannot be created (e.g., no scrollable area)
   }
 
-  // Wheel fallback: emulate progress in [0,1] so scroll ends at last image
+  // Wheel fallback: staged carousel transition with non-uniform speeds
+  let isTransitioning = false
+  const imageLayers = textCylinders.filter((l) => typeof l.phase === 'number')
+  const angleStep = (Math.PI * 2) / Math.max(1, imageCount)
+
+  function normalizeAngle(a) {
+    let x = a % (Math.PI * 2)
+    if (x > Math.PI) x -= Math.PI * 2
+    if (x < -Math.PI) x += Math.PI * 2
+    return x
+  }
+
+  function updateMeshForLayer(layer) {
+    const x = Math.sin(layer.angle) * layer.cylinderRadius * layer.ellipseScaleX
+    const z = -Math.cos(layer.angle) * layer.cylinderRadius
+    layer.mesh.position.x = x
+    layer.mesh.position.z = z
+    layer.mesh.lookAt(0, layer.mesh.position.y, 0)
+  }
+
+  function findCurrentIndex() {
+    let minAbs = Infinity
+    let idx = 0
+    imageLayers.forEach((layer, i) => {
+      const d = Math.abs(normalizeAngle(layer.angle))
+      if (d < minAbs) {
+        minAbs = d
+        idx = i
+      }
+    })
+    return idx
+  }
+
+  function performTransition(direction) {
+    if (isTransitioning || imageLayers.length === 0) return
+    isTransitioning = true
+
+    const prevIndex = findCurrentIndex()
+    const targetIndex = (prevIndex + direction + imageLayers.length) % imageLayers.length
+
+    let completed = 0
+    const total = imageLayers.length
+
+    imageLayers.forEach((layer, j) => {
+      // Compute final angle: rotate whole ring by one step
+      // Keep angles unbounded to avoid wrapping across the front (no re-cross)
+      const finalAngle = layer.angle - direction * angleStep
+      const idxInMixed = textCylinders.indexOf(layer)
+      const existing = activeTweens.get(idxInMixed)
+      if (existing) existing.kill()
+
+      // Variable durations
+      let duration = 0.45
+      let delay = 0
+      let ease = 'power2.out'
+
+      // Outgoing (current center) leaves FIRST, quick start
+      if (j === prevIndex) {
+        duration = 0.42
+        delay = 0 // start immediately
+        ease = 'power3.in' // accelerate out of center
+        // Incoming starts SLIGHTLY after outgoing begins
+      } else if (j === targetIndex) {
+        duration = 0.5 // arrives a bit later
+        delay = 0.12 // start after current begins leaving
+        ease = 'power3.out' // smooth arrival
+      } else {
+        // Speed decreases near current image (longer duration when closer)
+        let deltaSteps = Math.abs(j - prevIndex)
+        deltaSteps = Math.min(deltaSteps, imageLayers.length - deltaSteps)
+        const norm = imageLayers.length <= 1 ? 1 : deltaSteps / (imageLayers.length / 2)
+        const clamped = Math.max(0, Math.min(1, norm))
+        duration = 0.35 + (1 - clamped) * 0.45
+        // slight stagger so ring feels organic
+        delay = 0.04 * (direction > 0 ? j : imageLayers.length - j)
+      }
+
+      const tween = gsap.to(layer, {
+        angle: finalAngle,
+        duration,
+        delay,
+        ease,
+        onUpdate: () => updateMeshForLayer(layer),
+        onComplete: () => {
+          activeTweens.delete(idxInMixed)
+          completed += 1
+          if (completed === total) {
+            isTransitioning = false
+            // Snap text to new image index
+            const progressForText = targetIndex / Math.max(1, imageCount)
+            updateLayersForProgress(progressForText, 1 / Math.max(1, imageCount), true, false)
+          }
+        },
+      })
+      activeTweens.set(idxInMixed, tween)
+    })
+  }
+
   const onWheel = (e) => {
     const delta = e.deltaY || 0
-    // Map wheel delta to progress in [0,1] based on total scroll distance
-    const progressDelta = delta / totalScrollDistance
-    const newProgress = Math.max(0, Math.min(1, currentScrollProgress + progressDelta))
-    currentScrollProgress = newProgress
-    updateLayersForProgress(currentScrollProgress, startPhaseOffset, false)
+    if (delta === 0) return
+    // Determine direction: down => next (+1), up => prev (-1)
+    const direction = delta > 0 ? 1 : -1
+    performTransition(direction)
   }
-  window.addEventListener('wheel', onWheel, { passive: true })
-  removeWheelListener = () => window.removeEventListener('wheel', onWheel)
+
+  window.addEventListener('wheel', onWheel, { passive: false })
+  removeWheelListener = () => {
+    window.removeEventListener('wheel', onWheel)
+  }
 }
 
 function animate() {
