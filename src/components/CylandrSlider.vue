@@ -19,9 +19,14 @@ let activeTweens = new Map() // Track active tweens per layer to prevent spam
 let resizeTimeout = null // Debounce resize events
 let lastWindowSize = { width: 0, height: 0 } // Track size changes
 const ellipseScaleX = 1.5
-const scrollDirection = -1 // invert to change movement direction
+const scrollDirection = 1 // 1 = left to right, -1 = right to left
 const COLOR_WHITE = new THREE.Color('#ffffff')
 const COLOR_GRAY = new THREE.Color('#383838')
+
+// Easing function for smooth slow-down at center
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+}
 
 onMounted(() => {
   initScene()
@@ -135,14 +140,33 @@ function updateLayersForProgress(progress, startPhaseOffset, useDirectUpdate = f
     textColorFactors[2] = 1
   }
 
+  // Apply global easing based on image count
+  const imageCount = textCylinders.filter((l) => typeof l.phase === 'number').length
+  let easedProgress = progress
+
+  if (imageCount > 0) {
+    // Divide progress into segments, one per image
+    const progressPerImage = 1 / imageCount
+
+    // Find which image segment we're in
+    const segmentIdx = Math.floor(progress / progressPerImage)
+    const localProgress = (progress % progressPerImage) / progressPerImage
+
+    // Apply easing to this segment's local progress
+    const easedLocal = easeInOutCubic(localProgress)
+
+    // Reconstruct global eased progress
+    easedProgress = (segmentIdx + easedLocal) * progressPerImage
+  }
+
   // Pre-compute common values
-  const progressTimesDirection = progress * scrollDirection
+  const progressTimesDirection = easedProgress * scrollDirection
 
   textCylinders.forEach((layer, idx) => {
     let targetX
     if (typeof layer.phase === 'number') {
-      // Image layers - pre-computed multiplication
-      targetX = (startPhaseOffset + layer.phase - progress) * scrollDirection
+      // Image layers - use eased progress
+      targetX = (startPhaseOffset + layer.phase - easedProgress) * scrollDirection
     } else if (layer.type === 'text') {
       // Text layers with color crossfade - use cached factor
       const factor = textColorFactors[layer.index]
