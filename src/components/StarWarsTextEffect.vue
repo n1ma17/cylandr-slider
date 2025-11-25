@@ -17,7 +17,7 @@ onMounted(() => {
       end: '+=350%', // Scroll distance
       scrub: 1,
       pin: true,
-      // markers: true // for debugging
+      markers: true, // for debugging
     },
   })
   // Text animation: Street effect
@@ -26,40 +26,40 @@ onMounted(() => {
     {
       y: -900, // Start high/far
       z: -5000, // Far away
-      transform: 'rotateX(80deg)', // Tilted back as requested
+      rotateX: 80,
+      // transform: 'rotateX(80deg)', // Tilted back as requested
       opacity: 0,
     },
     {
       y: -50,
       z: 500, // Move closer
-      opacity: 1,
-      ease: 'sine.inOut',
-      duration: 5,
-    },
-  )
-  tl.fromTo(
-    lastTextRef.value,
-    {
-      y: -900, // Start high/far
-      z: -5000, // Far away
-      transform: 'rotateX(0deg)', // Tilted back as requested
-      opacity: 0,
-    },
-    {
-      y: -50,
-      z: 500, // Move closer
-      opacity: 1,
-      ease: 'sine.inOut',
-      duration: 5,
-    },
-  )
 
-  // Animate lastText rotateX to 0 after main animation
-  tl.to(lastTextRef.value, {
-    transform: 'rotateX(100deg)',
-    ease: 'sine.inOut',
-    duration: 3,
-  })
+      opacity: 1,
+      ease: 'sine.inOut',
+      duration: 1,
+    },
+  )
+    .to(textSectionRef.value, {
+      rotateX: 75,
+      ease: 'sine.inOut',
+      duration: 1,
+    })
+    .to(lastTextRef.value, {
+      y: 220,
+
+      ease: 'sine.inOut',
+      duration: 3,
+    })
+    .to(
+      textSectionRef.value,
+      {
+        rotateX: 0,
+        y: -520,
+        ease: 'sine.inOut',
+        duration: 1,
+      },
+      '<',
+    )
 })
 </script>
 
@@ -75,18 +75,11 @@ onMounted(() => {
           <p>Episode IV</p>
           <h1>A NEW HOPE</h1>
         </div>
-      </div>
-      <div class="crawl-content">
         <div class="title" ref="lastTextRef">
           <p>Episode IV</p>
           <h1>A NEW HOPE</h1>
         </div>
-
       </div>
-    </div>
-    <div class="scroll-instruction">
-      <span>SCROLL TO WARP</span>
-      <div class="arrow">↓</div>
     </div>
   </div>
 </template>
@@ -133,7 +126,7 @@ body {
   font-size: 3rem; /* Large text */
   line-height: 1.5;
   font-weight: 700;
-  transform-origin: 50% 50%;
+  /* transform-origin: 50% 50%; */
   /* transform: rotateX(25deg); Removed to let GSAP handle it */
   position: absolute;
   /* bottom: -10%; Removed */
@@ -155,21 +148,6 @@ body {
   margin: 0;
   font-size: 2rem;
   letter-spacing: 0.15em;
-}
-
-.scroll-instruction {
-  position: absolute;
-  bottom: 30px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: white;
-  font-family: sans-serif;
-  font-size: 0.8rem;
-  opacity: 0.5;
-  text-align: center;
-  z-index: 20;
-  animation: fadeOut 1s forwards;
-  animation-delay: 2s; /* Fade out after a bit */
 }
 
 /* Hide scroll instruction when scrolling starts (optional, handled by opacity) */
