@@ -280,7 +280,7 @@ function buildSurfaces() {
 
   const boxGeo = new THREE.BoxGeometry(boxWidth, boxHeight, boxDepth, 1, 1, 1)
   const boxMat = new THREE.MeshBasicMaterial({
-    color: '#000',
+    color: '#0f0f0f',
     transparent: false,
     opacity: 1,
     wireframe: false,
@@ -309,19 +309,19 @@ onMounted(() => {
     scrollTrigger: {
       trigger: containerRef.value,
       start: 'top top',
-      end: '200%  top',
+      end: '400%  top',
       scrub: 1,
       pin: true,
       markers: true,
     },
   })
   // Phase 1: bring group from far back toward camera
-  tl.to(textsGroup.position, { z: props.endZ, ease: 'sine.inOut' })
+  tl.to(textsGroup.position, { z: props.endZ, ease: 'sine.inOut', duration: 18 })
   // Phase 2: stand last text upright facing camera
   tl.addLabel('uprightStart')
-  tl.to(lastMesh.rotation, { x: 0, ease: 'sine.inOut' }, 'uprightStart')
+  tl.to(lastMesh.rotation, { x: 0, ease: 'sine.inOut', duration: 8 }, 'uprightStart')
   // Camera blend from base to follow starts exactly with the rotation
-  tl.to(camBlend, { value: 1, ease: 'sine.inOut' }, 'uprightStart')
+  tl.to(camBlend, { value: 1, ease: 'sine.inOut', duration: 4 }, 'uprightStart')
   // Phase 3: drop last text downward along the front face of the box
   // lock its Z slightly forward of the box front edge so it's more visible
   tl.call(() => {
@@ -331,7 +331,7 @@ onMounted(() => {
       lastMesh.position.z = edgeZRel + forwardOffset
     }
   })
-  tl.to(lastMesh.position, { y: -2, ease: 'power1.in' })
+  tl.to(lastMesh.position, { y: -2, ease: 'power1.in', duration: 6 })
 
   tl.fromTo(
     debugItemRef.value,
@@ -392,7 +392,7 @@ onBeforeUnmount(() => {
   display: block;
   position: relative;
   background: radial-gradient(1200px 600px at 50% 50%, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0))
-    #000;
+    #212529;
   overflow: hidden;
 }
 
