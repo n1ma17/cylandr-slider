@@ -114,7 +114,7 @@ function createTextPlane(text, options) {
     color = '#ffffff',
     backgroundColor = 'transparent',
     textHeight = 2,
-    fontFamily = '600 140px Arial, Helvetica, sans-serif',
+    fontFamily = '900 140px sans-serif',
     padding = 48,
   } = options
 
