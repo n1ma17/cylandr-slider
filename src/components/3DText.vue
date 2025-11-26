@@ -34,9 +34,23 @@ const props = defineProps({
 })
 
 const canvasRef = ref(null)
+const CAPTION_FADE_TARGET = 0.75
+const COVER_PADDING = 1.5
+const SMOOTH_LERP = 0.035
 
-let scene, camera, renderer, box, animationId, controls, textPlanes, textGroup, scrollTimeline
+let scene,
+  camera,
+  renderer,
+  box,
+  coverBox,
+  animationId,
+  controls,
+  textPlanes,
+  textGroup,
+  scrollTimeline,
+  smoothTrigger
 const textTravel = { start: 0, end: 0 }
+const smoothProgress = { current: 0, target: 0 }
 
 const nextPowerOfTwo = (value) => 2 ** Math.ceil(Math.log2(Math.max(1, value)))
 
@@ -107,6 +121,71 @@ const disposeTextPlanes = () => {
   textGroup?.clear()
 }
 
+const disposeCoverBox = () => {
+  if (!coverBox) {
+    return
+  }
+  coverBox.geometry.dispose()
+  coverBox.material.dispose()
+  scene.remove(coverBox)
+  coverBox = null
+}
+
+const buildCoverGeometry = () => {
+  if (!box) {
+    return null
+  }
+  const { width = 0.5, height = 0.5, depth = 0.5 } = box.geometry.parameters || {}
+  return new THREE.BoxGeometry(
+    width + COVER_PADDING - 1.5,
+    height + COVER_PADDING - 1.5,
+    depth + COVER_PADDING - 1.5,
+    8,
+    8,
+    8,
+  )
+}
+
+const createCoverBox = () => {
+  disposeCoverBox()
+  if (!scene || !box) {
+    return
+  }
+
+  const geometry = buildCoverGeometry()
+  if (!geometry) {
+    return
+  }
+
+  const material = new THREE.MeshBasicMaterial({
+    color: '#343a40',
+    wireframe: true,
+    transparent: true,
+    opacity: CAPTION_FADE_TARGET,
+  })
+
+  coverBox = new THREE.Mesh(geometry, material)
+  coverBox.position.copy(box.position)
+  scene.add(coverBox)
+}
+
+const updateCoverBox = () => {
+  if (!scene || !box) {
+    return
+  }
+  const geometry = buildCoverGeometry()
+  if (!geometry) {
+    return
+  }
+  if (!coverBox) {
+    createCoverBox()
+    return
+  }
+  coverBox.geometry.dispose()
+  coverBox.geometry = geometry
+  coverBox.position.copy(box.position)
+}
+
 const createTextPlanes = () => {
   if (!scene || !box || !props.texts?.length) {
     return
@@ -162,52 +241,49 @@ const setupScrollAnimation = () => {
   }
 
   if (scrollTimeline) {
-    scrollTimeline.scrollTrigger?.kill()
     scrollTimeline.kill()
   }
+  if (smoothTrigger) {
+    smoothTrigger.kill()
+    smoothTrigger = null
+  }
+  smoothProgress.current = 0
+  smoothProgress.target = 0
 
   const lastPlane = textPlanes?.[0]
 
   scrollTimeline = gsap.timeline({
-    scrollTrigger: {
-      trigger: '.scene-container',
-      start: 'top top',
-      end: 'bottom bottom',
-      scrub: 1,
-      markers: false,
+    paused: true,
+    defaults: {
+      ease: 'sine.inOut',
     },
   })
 
   scrollTimeline.to(textGroup.position, {
     z: box.position.z + textTravel.end,
-    ease: 'sine.inOut',
-    duration: 1,
+    duration: 11.6,
   })
 
   if (lastPlane) {
     scrollTimeline.to(lastPlane.position, {
       z: -4,
-      ease: 'sine.inOut',
-      duration: 0.6,
+      duration: 11,
     })
     scrollTimeline.to(lastPlane.rotation, {
-      x: 0.5,
-      ease: 'sine.inOut',
-      duration: 0.6,
+      x: -0.15,
+      duration: 20,
     })
     scrollTimeline.to(
       lastPlane.position,
       {
         y: -1,
-        ease: 'sine.inOut',
-        duration: 0.6,
+        duration: 20,
       },
       '>',
     )
     scrollTimeline.to(lastPlane.position, {
-      y: -13,
-      ease: 'sine.inOut',
-      duration: 0.6,
+      y: -10,
+      duration: 20,
     })
   }
 
@@ -216,8 +292,15 @@ const setupScrollAnimation = () => {
     {
       y: 0,
       z: -15,
-      ease: 'sine.inOut',
-      duration: 1,
+      duration: 20.6,
+    },
+    '<',
+  )
+  scrollTimeline.to(
+    camera.rotation,
+    {
+      x: -Math.PI,
+      duration: 11.6,
     },
     '<',
   )
@@ -232,10 +315,20 @@ const setupScrollAnimation = () => {
       opacity: 1,
       y: 0,
       ease: 'sine.inOut',
-      duration: 0.6,
+      duration: 11.6,
     },
     '>',
   )
+
+  smoothTrigger = ScrollTrigger.create({
+    trigger: '.scene-container',
+    start: 'top top',
+    end: 'bottom bottom',
+    markers: false,
+    onUpdate: (self) => {
+      smoothProgress.target = self.progress
+    },
+  })
 }
 
 // Handle window resize
@@ -253,6 +346,7 @@ const handleResize = () => {
 
     box.geometry.dispose()
     box.geometry = new THREE.BoxGeometry(visibleWidth, 2, 2)
+    updateCoverBox()
     createTextPlanes()
     setupScrollAnimation()
   }
@@ -294,6 +388,7 @@ onMounted(() => {
   })
   box = new THREE.Mesh(geometry, material)
   scene.add(box)
+  createCoverBox()
   createTextPlanes()
   setupScrollAnimation()
 
@@ -302,6 +397,10 @@ onMounted(() => {
     animationId = requestAnimationFrame(animate)
 
     renderer.render(scene, camera)
+    if (scrollTimeline && smoothTrigger) {
+      smoothProgress.current += (smoothProgress.target - smoothProgress.current) * SMOOTH_LERP
+      scrollTimeline.progress(gsap.utils.clamp(0, 1, smoothProgress.current))
+    }
   }
   animate()
 
@@ -319,6 +418,7 @@ onUnmounted(() => {
     renderer.dispose()
   }
   disposeTextPlanes()
+  disposeCoverBox()
   if (textGroup) {
     scene.remove(textGroup)
     textGroup = null
@@ -328,6 +428,12 @@ onUnmounted(() => {
     scrollTimeline.kill()
     scrollTimeline = null
   }
+  if (smoothTrigger) {
+    smoothTrigger.kill()
+    smoothTrigger = null
+  }
+  smoothProgress.current = 0
+  smoothProgress.target = 0
   ScrollTrigger.getAll().forEach((trigger) => trigger.kill())
   window.removeEventListener('resize', handleResize)
 })
