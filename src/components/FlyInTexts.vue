@@ -104,6 +104,7 @@ const baseCamPos = new THREE.Vector3(0, 6, 8)
 const baseLook = new THREE.Vector3(0, 0, 0)
 let boxMesh = null
 let boxEdgeWorldZ = 0
+let baseBoxWidth = 0
 // Camera blending: 0 = base camera, 1 = follow last text
 const camBlend = { value: 0 }
 const camPosBlend = new THREE.Vector3()
@@ -266,6 +267,8 @@ function handleResize() {
   camera.aspect = width / height
   camera.updateProjectionMatrix()
   renderer.setSize(width, height, false)
+  // Ensure box spans full viewport width after resize
+  updateBoxScaleAndPosition()
 }
 
 function buildSurfaces() {
@@ -292,10 +295,34 @@ function buildSurfaces() {
   // - front face (Z = boxDepth/2) is at boxEdgeWorldZ (the lip)
   boxMesh.position.set(0, -boxHeight / 2, boxEdgeWorldZ - boxDepth / 2)
   scene.add(boxMesh)
+  baseBoxWidth = boxWidth
+  // Match box width to current viewport width
+  updateBoxScaleAndPosition()
   disposables.push(() => {
     boxGeo.dispose()
     boxMat.dispose()
   })
+}
+
+function getViewportWorldHalfWidthAtZ(worldZ) {
+  if (!camera) return 0
+  // Distance from camera to the target Z (assuming camera looks down -Z)
+  const distance = Math.abs(camera.position.z - worldZ)
+  const halfFovY = THREE.MathUtils.degToRad(camera.fov * 0.3)
+  const halfHeight = Math.tan(halfFovY) * distance
+  return halfHeight * camera.aspect
+}
+
+function updateBoxScaleAndPosition() {
+  if (!boxMesh || !camera) return
+  // Compute the viewport width (in world units) around the box front edge depth
+  const halfW = getViewportWorldHalfWidthAtZ(boxEdgeWorldZ)
+  const desiredWidth = halfW * 2
+  if (baseBoxWidth > 0) {
+    boxMesh.scale.x = desiredWidth / baseBoxWidth
+  }
+  // Keep centered horizontally so it covers the entire screen width
+  boxMesh.position.x = 0
 }
 
 onMounted(() => {
@@ -407,9 +434,6 @@ onBeforeUnmount(() => {
   font-size: 24px;
   font-weight: bold;
   font-family: monospace;
-  padding: 20px;
   opacity: 0;
-}
-.debug-item {
 }
 </style>
