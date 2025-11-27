@@ -206,7 +206,15 @@ const createTextPlanes = () => {
 
   const planes = props.texts
     .filter((text) => typeof text === 'string' && text.trim().length)
-    .map((text) => createTextPlaneMesh(text.trim()))
+    .map((text, index) => {
+      const mesh = createTextPlaneMesh(text.trim())
+      if (index === 1) {
+        mesh.material.opacity = 0.5
+      } else if (index === 2) {
+        mesh.material.opacity = 0.25
+      }
+      return mesh
+    })
 
   if (!planes.length) {
     textPlanes = []
