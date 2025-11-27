@@ -102,6 +102,7 @@ const createTextPlaneMesh = (label) => {
     map: texture,
     transparent: true,
     side: THREE.DoubleSide,
+    fog: true,
   })
 
   const plane = new THREE.Mesh(geometry, material)
@@ -258,41 +259,69 @@ const setupScrollAnimation = () => {
       ease: 'sine.inOut',
     },
   })
-
-  scrollTimeline.to(textGroup.position, {
-    z: box.position.z + textTravel.end,
-    duration: 11.6,
+  scrollTimeline.to(textPlanes?.[0].position, {
+    z: -24,
+    duration: 10.6,
   })
+  scrollTimeline.to(
+    textPlanes?.[1].position,
+    {
+      z: -22,
+      duration: 10.6,
+    },
+    '>',
+  )
+  scrollTimeline.to(
+    textPlanes?.[textPlanes.length - 1].position,
+    {
+      z: -20,
+      duration: 10.6,
+    },
+    '>',
+  )
+  // scrollTimeline.to(textGroup.position, {
+  //   z: box.position.z + textTravel.end,
+  //   duration: 11.6,
+  // })
 
   if (lastPlane) {
     scrollTimeline.to(lastPlane.position, {
-      z: -4,
-      duration: 11,
+      z: -28,
+      duration: 13,
     })
-    scrollTimeline.to(lastPlane.rotation, {
-      x: -0.15,
-      duration: 20,
-    })
+    scrollTimeline.to(
+      lastPlane.rotation,
+      {
+        x: -0.01,
+        duration: 15,
+      },
+      '>',
+    )
+
     scrollTimeline.to(
       lastPlane.position,
       {
         y: -1,
-        duration: 20,
+        duration: 13,
+      },
+      '<',
+    )
+    scrollTimeline.to(
+      lastPlane.position,
+      {
+        y: -14,
+        duration: 15,
       },
       '>',
     )
-    scrollTimeline.to(lastPlane.position, {
-      y: -10,
-      duration: 20,
-    })
   }
 
   scrollTimeline.to(
     camera.position,
     {
       y: 0,
-      z: -15,
-      duration: 20.6,
+      z: -25,
+      duration: 10.6,
     },
     '<',
   )
@@ -357,13 +386,14 @@ const captionsContainerRef = ref(null)
 onMounted(() => {
   // Scene setup
   scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x1a1a2e)
+  scene.fog = new THREE.FogExp2(0x131316, 0.065)
+  scene.background = new THREE.Color('#131316')
 
   // Camera setup
   camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000)
   camera.position.x = 0
-  camera.position.y = 15
-  camera.position.z = -15
+  camera.position.y = 24
+  camera.position.z = -20
   camera.lookAt(0, 0, 10)
 
   // Renderer setup
@@ -381,9 +411,9 @@ onMounted(() => {
   const visibleWidth = visibleHeight * camera.aspect
 
   // Create box geometry with width matching screen width
-  const geometry = new THREE.BoxGeometry(visibleWidth, visibleHeight + 2, 20)
+  const geometry = new THREE.BoxGeometry(visibleWidth - 15, visibleHeight + 2, 30)
   const material = new THREE.MeshBasicMaterial({
-    color: '#212529',
+    color: '#111111',
     side: THREE.FrontSide,
   })
   box = new THREE.Mesh(geometry, material)
