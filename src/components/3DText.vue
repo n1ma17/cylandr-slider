@@ -9,7 +9,7 @@ gsap.registerPlugin(ScrollTrigger)
 const props = defineProps({
   texts: {
     type: Array,
-    default: () => ['TEXT ONE', 'TEXT TWO', 'TEXT THREE'],
+    default: () => ['Continuos Innovation', 'Continuos Innovation', 'Continuos Innovation'],
   },
   textColor: {
     type: String,
@@ -25,7 +25,11 @@ const props = defineProps({
   },
   textHeight: {
     type: Number,
-    default: 1.6,
+    default: 7,
+  },
+  startZOffset: {
+    type: Number,
+    default: 20,
   },
   uppercase: {
     type: Boolean,
@@ -37,12 +41,19 @@ const canvasRef = ref(null)
 const CAPTION_FADE_TARGET = 0.75
 const COVER_PADDING = 1.5
 const SMOOTH_LERP = 0.035
+const CYLINDER_RADIUS = 0.04
+const CYLINDER_OFFSET_X = 7
+const MIDDLE_CYLINDER_COUNT = 4
 
 let scene,
   camera,
   renderer,
   box,
   coverBox,
+  cylinderLeft,
+  cylinderRight,
+  middleCylinders,
+  yCylinders,
   animationId,
   controls,
   textPlanes,
@@ -62,15 +73,26 @@ const createTextPlaneMesh = (label) => {
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d')
   ctx.font = props.fontFamily
-  const metrics = ctx.measureText(text)
-  const textWidth = Math.ceil(metrics.width || 0)
-  const textHeightPx =
-    Math.ceil(
-      (metrics.actualBoundingBoxAscent || 120) + (metrics.actualBoundingBoxDescent || 40),
-    ) || 160
+  // Build lines: respect explicit newlines; otherwise, split exactly-two-word texts into two lines
+  let lines
+  if (text.includes('\n')) {
+    lines = text.split(/\r?\n/)
+  } else {
+    const words = text.split(/\s+/).filter(Boolean)
+    lines = words.length === 2 ? words : [text]
+  }
+  // Measure per-line metrics
+  const measurements = lines.map((l) => ctx.measureText(l))
+  const textWidth = Math.ceil(Math.max(0, ...measurements.map((m) => Math.max(0, m.width || 0))))
+  const ascent = Math.ceil(measurements[0]?.actualBoundingBoxAscent || 120)
+  const descent = Math.ceil(measurements[0]?.actualBoundingBoxDescent || 40)
+  const lineHeightPx = Math.max(1, ascent + descent)
+  const lineGapPx = Math.round(lineHeightPx * 0.3)
+  const totalLines = Math.max(1, lines.length)
+  const totalTextHeightPx = totalLines * lineHeightPx + Math.max(0, totalLines - 1) * lineGapPx
 
   canvas.width = nextPowerOfTwo(textWidth + padding * 2)
-  canvas.height = nextPowerOfTwo(textHeightPx + padding * 2)
+  canvas.height = nextPowerOfTwo(totalTextHeightPx + padding * 2)
 
   const ctx2 = canvas.getContext('2d')
   ctx2.clearRect(0, 0, canvas.width, canvas.height)
@@ -85,7 +107,12 @@ const createTextPlaneMesh = (label) => {
   ctx2.shadowColor = 'rgba(0,0,0,0.45)'
   ctx2.shadowBlur = 18
   ctx2.translate(canvas.width / 2, canvas.height / 2)
-  ctx2.fillText(text, 0, 4)
+  // Draw each line centered, vertically stacked
+  const startY = -Math.round((totalTextHeightPx - lineHeightPx) / 2)
+  lines.forEach((line, idx) => {
+    const y = startY + idx * (lineHeightPx + lineGapPx)
+    ctx2.fillText(line, 0, y + 4)
+  })
 
   const texture = new THREE.CanvasTexture(canvas)
   texture.minFilter = THREE.LinearFilter
@@ -187,6 +214,196 @@ const updateCoverBox = () => {
   coverBox.position.copy(box.position)
 }
 
+const disposeCylinders = () => {
+  if (cylinderLeft) {
+    cylinderLeft.geometry.dispose()
+    cylinderLeft.material.dispose()
+    scene.remove(cylinderLeft)
+    cylinderLeft = null
+  }
+  if (cylinderRight) {
+    cylinderRight.geometry.dispose()
+    cylinderRight.material.dispose()
+    scene.remove(cylinderRight)
+    cylinderRight = null
+  }
+  if (middleCylinders?.length) {
+    middleCylinders.forEach((mesh) => {
+      mesh.geometry.dispose()
+      mesh.material.dispose()
+      scene.remove(mesh)
+    })
+  }
+  middleCylinders = []
+}
+
+const disposeYCylinders = () => {
+  if (yCylinders?.length) {
+    yCylinders.forEach((mesh) => {
+      mesh.geometry.dispose()
+      mesh.material.dispose()
+      scene.remove(mesh)
+    })
+  }
+  yCylinders = []
+}
+
+const createYCylinders = () => {
+  disposeYCylinders()
+  if (!scene || !box) {
+    return
+  }
+  const { height = 1 } = box.geometry.parameters || {}
+  const boxTopY = height / 2
+
+  const total = MIDDLE_CYLINDER_COUNT + 2
+  const leftX = -CYLINDER_OFFSET_X
+  const step = (2 * CYLINDER_OFFSET_X) / (total - 1)
+
+  yCylinders = []
+  for (let i = 0; i < total; i++) {
+    const x = leftX + i * step
+    const geo = new THREE.CylinderGeometry(CYLINDER_RADIUS, CYLINDER_RADIUS, height, 16, 1, false)
+    // Anchor top at pivot so growth goes only downward (-Y)
+    geo.translate(0, -height / 2, 0)
+    const mat = new THREE.MeshBasicMaterial({ color: '#ffffff' })
+    const mesh = new THREE.Mesh(geo, mat)
+    // No rotation needed: Cylinder default axis is Y
+    mesh.position.set(x, boxTopY + 0.01, box.position.z - 15)
+    mesh.scale.y = 0
+    mesh.visible = false
+    scene.add(mesh)
+    yCylinders.push(mesh)
+  }
+}
+
+const updateYCylinders = () => {
+  if (!scene || !box) {
+    return
+  }
+  const { height = 1 } = box.geometry.parameters || {}
+  const total = MIDDLE_CYLINDER_COUNT + 2
+  if (!yCylinders || yCylinders.length !== total) {
+    createYCylinders()
+    return
+  }
+  const boxTopY = (box.geometry.parameters?.height || 2) / 2
+  const leftX = -CYLINDER_OFFSET_X
+  const step = (2 * CYLINDER_OFFSET_X) / (total - 1)
+  for (let i = 0; i < total; i++) {
+    const mesh = yCylinders[i]
+    const x = leftX + i * step
+    mesh.geometry.dispose()
+    const geo = new THREE.CylinderGeometry(CYLINDER_RADIUS, CYLINDER_RADIUS, height, 16, 1, false)
+    geo.translate(0, -height / 2, 0)
+    mesh.geometry = geo
+    mesh.position.set(x, boxTopY, box.position.z - 15.2)
+  }
+}
+
+const createCylinders = () => {
+  disposeCylinders()
+  if (!scene || !box) {
+    return
+  }
+
+  const { height = 1, depth = 1 } = box.geometry.parameters || {}
+  const leftMat = new THREE.MeshBasicMaterial({ color: '#ffffff' })
+  const rightMat = new THREE.MeshBasicMaterial({ color: '#ffffff' })
+
+  const leftGeo = new THREE.CylinderGeometry(CYLINDER_RADIUS, CYLINDER_RADIUS, depth, 8, 1, false)
+  leftGeo.translate(0, depth / 2, 0)
+  const rightGeo = new THREE.CylinderGeometry(CYLINDER_RADIUS, CYLINDER_RADIUS, depth, 8, 1, false)
+  rightGeo.translate(0, depth / 2, 0)
+
+  cylinderLeft = new THREE.Mesh(leftGeo, leftMat)
+  cylinderRight = new THREE.Mesh(rightGeo, rightMat)
+
+  cylinderLeft.rotation.x = Math.PI / 2
+  cylinderRight.rotation.x = Math.PI / 2
+
+  const boxTopY = height / 2
+  cylinderLeft.position.set(-CYLINDER_OFFSET_X, boxTopY + CYLINDER_RADIUS, box.position.z + 11)
+  cylinderRight.position.set(CYLINDER_OFFSET_X, boxTopY + CYLINDER_RADIUS, box.position.z + 11)
+
+  scene.add(cylinderLeft)
+  scene.add(cylinderRight)
+
+  // Create 4 middle cylinders evenly spaced between left and right
+  middleCylinders = []
+  const total = MIDDLE_CYLINDER_COUNT + 2 // include left and right
+  const leftX = -CYLINDER_OFFSET_X
+  const step = (2 * CYLINDER_OFFSET_X) / (total - 1)
+  for (let i = 1; i <= MIDDLE_CYLINDER_COUNT; i++) {
+    const geo = new THREE.CylinderGeometry(CYLINDER_RADIUS, CYLINDER_RADIUS, depth, 16, 1, false)
+    geo.translate(0, depth / 2, 0)
+    const mat = new THREE.MeshBasicMaterial({ color: '#ffffff' })
+    const mid = new THREE.Mesh(geo, mat)
+    mid.rotation.x = Math.PI / 2
+    mid.position.set(leftX + i * step, boxTopY + CYLINDER_RADIUS, box.position.z + 11)
+    scene.add(mid)
+    middleCylinders.push(mid)
+  }
+
+  // Start with zero visible depth (animate scale.y from 0 to 1)
+  cylinderLeft.scale.y = 0
+  cylinderRight.scale.y = 0
+  if (middleCylinders?.length) {
+    middleCylinders.forEach((m) => (m.scale.y = 0))
+  }
+}
+
+const updateCylinders = () => {
+  if (!scene || !box) {
+    return
+  }
+  const { height = 1, depth = 1 } = box.geometry.parameters || {}
+  if (!cylinderLeft || !cylinderRight) {
+    createCylinders()
+    return
+  }
+
+  cylinderLeft.geometry.dispose()
+  {
+    const geo = new THREE.CylinderGeometry(CYLINDER_RADIUS, CYLINDER_RADIUS, depth, 16, 1, false)
+    geo.translate(0, depth / 2, 0)
+    cylinderLeft.geometry = geo
+  }
+  cylinderRight.geometry.dispose()
+  {
+    const geo = new THREE.CylinderGeometry(CYLINDER_RADIUS, CYLINDER_RADIUS, depth, 16, 1, false)
+    geo.translate(0, depth / 2, 0)
+    cylinderRight.geometry = geo
+  }
+
+  cylinderLeft.rotation.x = Math.PI / 2
+  cylinderRight.rotation.x = Math.PI / 2
+
+  const boxTopY = height / 2
+  cylinderLeft.position.set(-CYLINDER_OFFSET_X, boxTopY + CYLINDER_RADIUS, box.position.z)
+  cylinderRight.position.set(CYLINDER_OFFSET_X, boxTopY + CYLINDER_RADIUS, box.position.z)
+
+  // Ensure and update middle cylinders
+  if (!middleCylinders || middleCylinders.length !== MIDDLE_CYLINDER_COUNT) {
+    createCylinders()
+    return
+  }
+  const total = MIDDLE_CYLINDER_COUNT + 2
+  const leftX = -CYLINDER_OFFSET_X
+  const step = (2 * CYLINDER_OFFSET_X) / (total - 1)
+  for (let i = 0; i < MIDDLE_CYLINDER_COUNT; i++) {
+    const mesh = middleCylinders[i]
+    mesh.geometry.dispose()
+    {
+      const geo = new THREE.CylinderGeometry(CYLINDER_RADIUS, CYLINDER_RADIUS, depth, 16, 1, false)
+      geo.translate(0, depth / 2, 0)
+      mesh.geometry = geo
+    }
+    mesh.rotation.x = Math.PI / 2
+    mesh.position.set(leftX + (i + 1) * step, boxTopY + CYLINDER_RADIUS, box.position.z)
+  }
+}
+
 const createTextPlanes = () => {
   if (!scene || !box || !props.texts?.length) {
     return
@@ -233,7 +450,7 @@ const createTextPlanes = () => {
   const travelOffset = Math.max(0, halfDepth - totalDepth / 2)
   textTravel.start = travelOffset
   textTravel.end = -travelOffset
-  textGroup.position.set(0, boxTopY, box.position.z + textTravel.start)
+  textGroup.position.set(0, boxTopY, box.position.z + textTravel.start + props.startZOffset)
 }
 
 const setupScrollAnimation = () => {
@@ -259,14 +476,32 @@ const setupScrollAnimation = () => {
       ease: 'sine.inOut',
     },
   })
+  // Animate cylinders' visible depth from 0 -> full by scaling along local Y (aligned to Z)
+  const allCylinderScales = [
+    ...(cylinderLeft ? [cylinderLeft.scale] : []),
+    ...(middleCylinders?.length ? middleCylinders.map((m) => m.scale) : []),
+    ...(cylinderRight ? [cylinderRight.scale] : []),
+  ]
+
   scrollTimeline.to(textPlanes?.[0].position, {
-    z: -24,
+    z: -35,
     duration: 10.6,
   })
+  if (allCylinderScales.length) {
+    allCylinderScales.forEach((s) => (s.y = 0))
+    scrollTimeline.to(
+      allCylinderScales,
+      {
+        y: -0.867,
+        duration: 5,
+      },
+      '<+=0.51',
+    )
+  }
   scrollTimeline.to(
     textPlanes?.[1].position,
     {
-      z: -22,
+      z: -29,
       duration: 10.6,
     },
     '>',
@@ -286,9 +521,19 @@ const setupScrollAnimation = () => {
 
   if (lastPlane) {
     scrollTimeline.to(lastPlane.position, {
-      z: -28,
+      z: -36,
       duration: 13,
     })
+    // Reveal Y-axis cylinders here and grow them upward before rotation starts
+    if (yCylinders?.length) {
+      scrollTimeline.set(
+        yCylinders,
+        {
+          visible: true,
+        },
+        '<',
+      )
+    }
     scrollTimeline.to(
       lastPlane.rotation,
       {
@@ -306,6 +551,7 @@ const setupScrollAnimation = () => {
       },
       '<',
     )
+
     scrollTimeline.to(
       lastPlane.position,
       {
@@ -313,6 +559,15 @@ const setupScrollAnimation = () => {
         duration: 15,
       },
       '>',
+    )
+    scrollTimeline.to(
+      yCylinders.map((m) => m.scale),
+      {
+        y: 1,
+        duration: 10,
+        ease: 'sine.inOut',
+      },
+      '<',
     )
   }
 
@@ -376,6 +631,8 @@ const handleResize = () => {
     box.geometry.dispose()
     box.geometry = new THREE.BoxGeometry(visibleWidth, 2, 2)
     updateCoverBox()
+    updateCylinders()
+    updateYCylinders()
     createTextPlanes()
     setupScrollAnimation()
   }
@@ -419,6 +676,8 @@ onMounted(() => {
   box = new THREE.Mesh(geometry, material)
   scene.add(box)
   createCoverBox()
+  createCylinders()
+  createYCylinders()
   createTextPlanes()
   setupScrollAnimation()
 
@@ -449,6 +708,8 @@ onUnmounted(() => {
   }
   disposeTextPlanes()
   disposeCoverBox()
+  disposeCylinders()
+  disposeYCylinders()
   if (textGroup) {
     scene.remove(textGroup)
     textGroup = null
